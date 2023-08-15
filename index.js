@@ -1,5 +1,8 @@
 const express = require("express");
 const cors = require("cors");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
+const nodemailer = require("nodemailer");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
@@ -27,8 +30,51 @@ async function run() {
     const usersCollection = client.db("aircncdb").collection("users");
     const bookingsCollection = client.db("aircncdb").collection("bookings");
 
-    // send email
-    const sendMail = (emailData, email) => {};
+    // Send Email
+    const sendMail = (emailData, email) => {
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: process.env.APP_MAIL,
+          pass: process.env.APP_PASS,
+        },
+      });
+
+      const mailOptions = {
+        from: process.env.APP_MAIL,
+        to: email,
+        subject: emailData?.subject,
+        html: `<p>${emailData?.message}</p>
+          
+        `,
+      };
+
+      transporter.sendMail(mailOptions, function (error, info) {
+        if (error) {
+          console.log(error);
+        } else {
+          console.log("Email sent: " + info.response);
+        }
+      });
+    };
+
+    // Create Payment Intent
+    app.post("/create-payment-intent", async (req, res) => {
+      const price = req.body.price;
+      console.log(price);
+      const amount = parseFloat(price) * 100;
+
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (err) {
+        console.log(err);
+      }
+    });
 
     // save user email and generate JWT
     app.put("/user/:email", async (req, res) => {
@@ -61,7 +107,7 @@ async function run() {
           subject: "Booking Successful !",
           message: `Booking ID : ${result.insertedId}`,
         },
-        booking?.guestEmail
+        bookingData?.guestEmail
       );
       res.send(result);
       console.log(result);
@@ -78,6 +124,13 @@ async function run() {
       }
       const bookings = await bookingsCollection.find(query).toArray();
       res.send(bookings);
+    });
+
+    app.delete("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingsCollection.deleteOne(query);
+      res.send(result);
     });
 
     // get a single user by email
